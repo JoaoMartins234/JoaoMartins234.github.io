@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>DER — Visualização 2D e 3D (Funcional)</title>
+<title>DER — Visualização 2D e 3D com Fluxo</title>
 <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/controls/OrbitControls.js"></script>
 <style>
@@ -13,18 +13,14 @@
   .tabs button.active { background: white; color: #1e40af; }
   .view { display: none; height: calc(100vh - 52px); }
   .view.active { display: block; }
-
-  /* 2D */
   #view2d { padding: 20px; }
   #svg2d { width: 100%; max-width: 900px; height: 320px; background: white; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
   .controls2d { margin-top: 16px; }
   button.fault { margin: 4px; padding: 8px 14px; border-radius: 6px; border: 1px solid #cbd5e1; background: white; cursor: pointer; }
-  button.fault.active { background: #ef4444; color: white; border-color: #ef4444; }
-
-  /* 3D */
   #view3d { position: relative; }
   #canvas3d { width: 100%; height: 100%; display: block; }
-  .info3d { position: absolute; top: 16px; left: 16px; background: rgba(255,255,255,0.95); padding: 12px 16px; border-radius: 10px; font-size: 0.9rem; }
+  .info3d { position: absolute; top: 16px; left: 16px; background: rgba(255,255,255,0.95); padding: 12px 16px; border-radius: 10px; font-size: 0.9rem; max-width: 280px; }
+  .info3d button { margin: 4px 4px 0 0; padding: 6px 10px; border-radius: 6px; border: 1px solid #cbd5e1; background: white; cursor: pointer; font-size: 0.8rem; }
 </style>
 </head>
 <body>
@@ -32,43 +28,34 @@
   <h2>Visualização DER — Alimentador 2D e 3D</h2>
   <div class="tabs">
     <button class="active" onclick="show('2d')">Desenho 2D</button>
-    <button onclick="show('3d')">Cena 3D</button>
+    <button onclick="show('3d')">Cena 3D + Fluxo</button>
   </div>
 </div>
 
-<!-- 2D -->
 <div id="view2d" class="view active">
   <svg id="svg2d" viewBox="0 0 900 300">
-    <!-- Usina -->
     <rect x="30" y="110" width="80" height="80" rx="8" fill="#1e40af"/>
     <text x="70" y="155" text-anchor="middle" fill="white" font-size="14" font-weight="bold">USINA</text>
-
-    <!-- Linha do alimentador -->
     <line id="line" x1="110" y1="150" x2="850" y2="150" stroke="#64748b" stroke-width="6"/>
-
-    <!-- Nós -->
     <g id="nodes"></g>
-
-    <!-- Setas de fluxo -->
     <g id="arrows"></g>
   </svg>
-
   <div class="controls2d">
     <button class="fault" onclick="setFlow(false)">Fluxo Normal</button>
     <button class="fault" onclick="setFlow(true)">Inversão de Fluxo</button>
     <button class="fault" onclick="setFault()">Simular Falta (N3)</button>
   </div>
-  <p id="msg2d" style="margin-top:12px; color:#475569;">Clique nos botões para ver o fluxo mudar de direção e a falta aparecer.</p>
+  <p id="msg2d" style="margin-top:12px; color:#475569;">Clique nos botões para ver o fluxo mudar de direção.</p>
 </div>
 
-<!-- 3D -->
 <div id="view3d" class="view">
   <div id="canvas3d"></div>
   <div class="info3d">
-    <strong>Cena 3D</strong><br>
-    Arraste com o mouse para girar<br>
-    Scroll para aproximar/afastar<br>
-    Usina (azul) • Postes • BESS (verde)
+    <strong>Cena 3D com Fluxo de Potência</strong><br>
+    Arraste para girar • Scroll para zoom<br><br>
+    <button onclick="setFlow3D(false)">Fluxo Normal (verde)</button>
+    <button onclick="setFlow3D(true)">Inversão (laranja)</button>
+    <p id="msg3d" style="margin-top:8px; font-size:0.85rem; color:#475569;">Partículas mostram a direção do fluxo.</p>
   </div>
 </div>
 
@@ -81,17 +68,12 @@ function show(id) {
   if (id === '3d' && !window.threeReady) init3D();
 }
 
-// ========== 2D ==========
+// 2D
 const nodePositions = [200, 320, 440, 560, 680, 800];
 const nodesGroup = document.getElementById('nodes');
 nodePositions.forEach((x, i) => {
-  nodesGroup.innerHTML += `
-    <circle cx="${x}" cy="150" r="22" fill="#f8fafc" stroke="#1e40af" stroke-width="3" id="n${i}"/>
-    <text x="${x}" y="155" text-anchor="middle" font-size="12" font-weight="bold">N${i+1}</text>
-    <text x="${x}" y="120" text-anchor="middle" font-size="11" fill="#64748b">${i%2===0?'Casa':'Comercial'}</text>
-  `;
+  nodesGroup.innerHTML += `<circle cx="${x}" cy="150" r="22" fill="#f8fafc" stroke="#1e40af" stroke-width="3" id="n${i}"/><text x="${x}" y="155" text-anchor="middle" font-size="12" font-weight="bold">N${i+1}</text>`;
 });
-
 function setFlow(reverse) {
   const arrows = document.getElementById('arrows');
   arrows.innerHTML = '';
@@ -100,27 +82,30 @@ function setFlow(reverse) {
     if (i === 0) return;
     const prev = nodePositions[i-1];
     const mid = (prev + x) / 2;
-    const pts = reverse
-      ? `${mid+15},150 ${mid-12},140 ${mid-12},160`
-      : `${mid-15},150 ${mid+12},140 ${mid+12},160`;
+    const pts = reverse ? `${mid+15},150 ${mid-12},140 ${mid-12},160` : `${mid-15},150 ${mid+12},140 ${mid+12},160`;
     arrows.innerHTML += `<polygon points="${pts}" fill="${color}"/>`;
   });
   document.getElementById('line').setAttribute('stroke', reverse ? '#f97316' : '#64748b');
-  document.getElementById('msg2d').textContent = reverse
-    ? 'Fluxo reverso ativo (laranja) — geração dos DERs maior que a carga.'
-    : 'Fluxo normal (verde) — da Usina para as cargas.';
+  document.getElementById('msg2d').textContent = reverse ? 'Fluxo reverso (laranja).' : 'Fluxo normal (verde).';
 }
-
 function setFault() {
   document.getElementById('n2').setAttribute('fill', '#fecaca');
   document.getElementById('n2').setAttribute('stroke', '#ef4444');
-  document.getElementById('msg2d').textContent = 'Falta simulada no nó N3 (círculo vermelho). Risco de ofuscamento de proteção.';
+  document.getElementById('msg2d').textContent = 'Falta no N3.';
 }
-
 setFlow(false);
 
-// ========== 3D ==========
+// 3D com partículas
 let threeReady = false;
+let flowDir = 1;
+let particleMat, particles, particleCount = 60;
+
+function setFlow3D(reverse) {
+  flowDir = reverse ? -1 : 1;
+  if (particleMat) particleMat.color.set(reverse ? 0xf97316 : 0x22c55e);
+  document.getElementById('msg3d').textContent = reverse ? 'Inversão de fluxo ativa (partículas laranja ←).' : 'Fluxo normal (partículas verde →).';
+}
+
 function init3D() {
   if (threeReady) return;
   threeReady = true;
@@ -144,53 +129,53 @@ function init3D() {
   light.position.set(10, 15, 8);
   scene.add(light);
 
-  // Chão
-  const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(30, 12),
-    new THREE.MeshStandardMaterial({ color: 0xe2e8f0 })
-  );
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(30, 12), new THREE.MeshStandardMaterial({ color: 0xe2e8f0 }));
   ground.rotation.x = -Math.PI / 2;
   scene.add(ground);
 
-  // Usina
-  const usina = new THREE.Mesh(
-    new THREE.BoxGeometry(3, 2.5, 2.5),
-    new THREE.MeshStandardMaterial({ color: 0x1e40af })
-  );
+  const usina = new THREE.Mesh(new THREE.BoxGeometry(3, 2.5, 2.5), new THREE.MeshStandardMaterial({ color: 0x1e40af }));
   usina.position.set(-8, 1.25, 0);
   scene.add(usina);
 
-  // Postes + casas
   for (let i = 0; i < 5; i++) {
     const x = -3 + i * 3;
-    const pole = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.12, 0.16, 5),
-      new THREE.MeshStandardMaterial({ color: 0x64748b })
-    );
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.16, 5), new THREE.MeshStandardMaterial({ color: 0x64748b }));
     pole.position.set(x, 2.5, 0);
     scene.add(pole);
-
     if (i % 2 === 0) {
-      const house = new THREE.Mesh(
-        new THREE.BoxGeometry(1.4, 1.2, 1.4),
-        new THREE.MeshStandardMaterial({ color: 0xffffff })
-      );
+      const house = new THREE.Mesh(new THREE.BoxGeometry(1.4, 1.2, 1.4), new THREE.MeshStandardMaterial({ color: 0xffffff }));
       house.position.set(x, 0.6, 2.2);
       scene.add(house);
     }
   }
 
-  // BESS
-  const bess = new THREE.Mesh(
-    new THREE.BoxGeometry(2.2, 1.6, 1.4),
-    new THREE.MeshStandardMaterial({ color: 0x059669 })
-  );
+  const bess = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.6, 1.4), new THREE.MeshStandardMaterial({ color: 0x059669 }));
   bess.position.set(7, 0.8, 1.5);
   scene.add(bess);
+
+  // Partículas de fluxo
+  const pGeo = new THREE.BufferGeometry();
+  const pPos = new Float32Array(particleCount * 3);
+  for (let i = 0; i < particleCount; i++) {
+    pPos[i*3] = -6 + Math.random() * 16;
+    pPos[i*3+1] = 3.2;
+    pPos[i*3+2] = (Math.random() - 0.5) * 1.2;
+  }
+  pGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3));
+  particleMat = new THREE.PointsMaterial({ color: 0x22c55e, size: 0.18 });
+  particles = new THREE.Points(pGeo, particleMat);
+  scene.add(particles);
 
   function animate() {
     requestAnimationFrame(animate);
     controls.update();
+    const arr = particles.geometry.attributes.position.array;
+    for (let i = 0; i < particleCount; i++) {
+      arr[i*3] += 0.06 * flowDir;
+      if (flowDir > 0 && arr[i*3] > 10) arr[i*3] = -7;
+      if (flowDir < 0 && arr[i*3] < -7) arr[i*3] = 10;
+    }
+    particles.geometry.attributes.position.needsUpdate = true;
     renderer.render(scene, camera);
   }
   animate();
