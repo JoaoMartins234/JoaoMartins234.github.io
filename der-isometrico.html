@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DER — Visualização Isométrica (Postes, Usina, Casas)</title>
+<style>
+  body { margin: 0; font-family: Segoe UI, system-ui, sans-serif; background: #f1f5f9; color: #1e293b; }
+  .header { background: #1e40af; color: white; padding: 14px 20px; }
+  .header h1 { margin: 0; font-size: 1.3rem; }
+  .controls { padding: 12px 20px; background: white; border-bottom: 1px solid #e2e8f0; }
+  button { margin: 4px; padding: 8px 14px; border-radius: 6px; border: 1px solid #cbd5e1; background: white; cursor: pointer; font-size: 0.9rem; }
+  button.active { background: #1e40af; color: white; border-color: #1e40af; }
+  #canvas { width: 100%; height: calc(100vh - 120px); background: #e2e8f0; }
+  #msg { padding: 8px 20px; font-size: 0.9rem; color: #475569; }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>Rede Ativa — Visualização Isométrica</h1>
+</div>
+<div class="controls">
+  <button class="active" onclick="setMode('normal')">Fluxo Normal</button>
+  <button onclick="setMode('reverse')">Inversão de Fluxo</button>
+  <button onclick="setMode('fault')">Falta no N3</button>
+  <button onclick="setMode('island')">Ilhamento</button>
+</div>
+<svg id="canvas" viewBox="0 0 1000 500"></svg>
+<div id="msg">Usina (azul) • Postes • Fiação • Casas com painel solar • BESS (verde)</div>
+
+<script>
+const svg = document.getElementById('canvas');
+const msg = document.getElementById('msg');
+
+// Função isométrica simples
+function iso(x, y, z) {
+  return {
+    x: 200 + (x - y) * 28,
+    y: 280 - (x + y) * 14 - z * 18
+  };
+}
+
+function draw() {
+  svg.innerHTML = '';
+
+  // Chão
+  const ground = iso(0,0,0);
+  svg.innerHTML += `<polygon points="${iso(-2,8,0).x},${iso(-2,8,0).y} ${iso(10,8,0).x},${iso(10,8,0).y} ${iso(10,-1,0).x},${iso(10,-1,0).y} ${iso(-2,-1,0).x},${iso(-2,-1,0).y}" fill="#cbd5e1"/>`;
+
+  // USINA
+  drawBox(-1.5, 0.5, 0, 2.2, 1.8, 2.4, '#1e40af');
+  drawCylinder(-0.4, 0.5, 2.4, 0.25, 1.8, '#475569');
+  drawText(iso(-0.5, 0.5, 4.5), 'USINA / SE', '#1e40af');
+
+  // Postes + fiação + casas
+  const polePositions = [1, 2.5, 4, 5.5, 7, 8.5];
+  polePositions.forEach((px, i) => {
+    // Poste
+    drawCylinder(px, 0, 0, 0.12, 3.2, '#64748b');
+    // Cruzeta
+    drawBox(px-0.6, -0.05, 3.0, 1.2, 0.1, 0.1, '#475569');
+
+    // Casa (alternada)
+    if (i % 2 === 0) {
+      drawBox(px, 1.8, 0, 1.1, 1.1, 0.9, '#f8fafc');
+      drawRoof(px, 1.8, 0.9, 1.3, '#94a3b8');
+      // Painel
+      drawBox(px, 1.8, 1.15, 0.8, 0.6, 0.05, '#1e3a8a');
+    }
+  });
+
+  // Fiação
+  let wirePath = '';
+  polePositions.forEach((px, i) => {
+    const p = iso(px, 0, 3.15);
+    wirePath += (i===0 ? 'M' : 'L') + p.x + ',' + p.y;
+  });
+  svg.innerHTML += `<path d="${wirePath}" fill="none" stroke="#334155" stroke-width="2.5"/>`;
+
+  // Ligação Usina → primeiro poste
+  const u = iso(-0.5, 0.5, 1.8);
+  const p0 = iso(polePositions[0], 0, 3.15);
+  svg.innerHTML += `<line x1="${u.x}" y1="${u.y}" x2="${p0.x}" y2="${p0.y}" stroke="#1e40af" stroke-width="3"/>`;
+
+  // BESS
+  drawBox(9.2, 1.5, 0, 1.6, 1.0, 1.3, '#059669');
+  drawText(iso(9.2, 1.5, 1.8), 'BESS', '#059669');
+
+  // Partículas / setas de fluxo
+  drawFlow();
+}
+
+function drawBox(x, y, z, w, d, h, color) {
+  const p = [
+    iso(x-w/2, y-d/2, z),
+    iso(x+w/2, y-d/2, z),
+    iso(x+w/2, y+d/2, z),
+    iso(x-w/2, y+d/2, z),
+    iso(x-w/2, y-d/2, z+h),
+    iso(x+w/2, y-d/2, z+h),
+    iso(x+w/2, y+d/2, z+h),
+    iso(x-w/2, y+d/2, z+h)
+  ];
+  // Faces
+  svg.innerHTML += `<polygon points="${p[4].x},${p[4].y} ${p[5].x},${p[5].y} ${p[6].x},${p[6].y} ${p[7].x},${p[7].y}" fill="${color}" stroke="#1e293b" stroke-width="0.5"/>`;
+  svg.innerHTML += `<polygon points="${p[1].x},${p[1].y} ${p[2].x},${p[2].y} ${p[6].x},${p[6].y} ${p[5].x},${p[5].y}" fill="${shade(color,-20)}" stroke="#1e293b" stroke-width="0.5"/>`;
+  svg.innerHTML += `<polygon points="${p[3].x},${p[3].y} ${p[2].x},${p[2].y} ${p[6].x},${p[6].y} ${p[7].x},${p[7].y}" fill="${shade(color,-40)}" stroke="#1e293b" stroke-width="0.5"/>`;
+}
+
+function drawCylinder(x, y, z, r, h, color) {
+  const top = iso(x, y, z+h);
+  const bot = iso(x, y, z);
+  svg.innerHTML += `<ellipse cx="${top.x}" cy="${top.y}" rx="8" ry="4" fill="${shade(color,10)}"/>`;
+  svg.innerHTML += `<line x1="${bot.x-6}" y1="${bot.y}" x2="${top.x-6}" y2="${top.y}" stroke="${color}" stroke-width="3"/>`;
+  svg.innerHTML += `<line x1="${bot.x+6}" y1="${bot.y}" x2="${top.x+6}" y2="${top.y}" stroke="${color}" stroke-width="3"/>`;
+}
+
+function drawRoof(x, y, z, size, color) {
+  const p1 = iso(x, y, z+0.6);
+  const p2 = iso(x-size/2, y-size/2, z);
+  const p3 = iso(x+size/2, y-size/2, z);
+  const p4 = iso(x+size/2, y+size/2, z);
+  const p5 = iso(x-size/2, y+size/2, z);
+  svg.innerHTML += `<polygon points="${p1.x},${p1.y} ${p2.x},${p2.y} ${p3.x},${p3.y}" fill="${color}"/>`;
+  svg.innerHTML += `<polygon points="${p1.x},${p1.y} ${p3.x},${p3.y} ${p4.x},${p4.y}" fill="${shade(color,-20)}"/>`;
+  svg.innerHTML += `<polygon points="${p1.x},${p1.y} ${p4.x},${p4.y} ${p5.x},${p5.y}" fill="${shade(color,-35)}"/>`;
+}
+
+function drawText(pos, text, color) {
+  svg.innerHTML += `<text x="${pos.x}" y="${pos.y-8}" text-anchor="middle" font-size="13" font-weight="bold" fill="${color}">${text}</text>`;
+}
+
+function shade(hex, percent) {
+  const num = parseInt(hex.slice(1), 16);
+  const amt = Math.round(2.55 * percent);
+  const R = Math.min(255, Math.max(0, (num >> 16) + amt));
+  const G = Math.min(255, Math.max(0, (num >> 8 & 0x00FF) + amt));
+  const B = Math.min(255, Math.max(0, (num & 0x0000FF) + amt));
+  return '#' + (0x1000000 + R*0x10000 + G*0x100 + B).toString(16).slice(1);
+}
+
+let currentMode = 'normal';
+function drawFlow() {
+  const color = currentMode === 'reverse' ? '#f97316' : currentMode === 'fault' ? '#ef4444' : '#22c55e';
+  const dir = currentMode === 'reverse' ? -1 : 1;
+  for (let i = 0; i < 5; i++) {
+    const x = 2 + i * 1.4;
+    const p = iso(x, 0, 3.3);
+    const arrow = dir > 0 ? `${p.x+8},${p.y} ${p.x-4},${p.y-5} ${p.x-4},${p.y+5}` : `${p.x-8},${p.y} ${p.x+4},${p.y-5} ${p.x+4},${p.y+5}`;
+    svg.innerHTML += `<polygon points="${arrow}" fill="${color}"/>`;
+  }
+}
+
+function setMode(mode) {
+  currentMode = mode;
+  document.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+  event.target.classList.add('active');
+  draw();
+  const texts = {
+    normal: 'Fluxo normal (setas verdes →) da Usina para as cargas.',
+    reverse: 'Inversão de fluxo (setas laranja ←). Geração DER maior que a carga.',
+    fault: 'Falta simulada. Fluxo interrompido na região central.',
+    island: 'Ilhamento: alimentador isolado, sustentado pelo BESS e inversores locais.'
+  };
+  msg.textContent = texts[mode];
+}
+
+draw();
+</script>
+</body>
+</html>
