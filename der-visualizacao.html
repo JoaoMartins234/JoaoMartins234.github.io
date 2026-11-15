@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DER — Visualização 2D e 3D (Funcional)</title>
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/controls/OrbitControls.js"></script>
+<style>
+  body { margin: 0; font-family: Segoe UI, sans-serif; background: #f1f5f9; }
+  .header { background: #1e40af; color: white; padding: 12px 20px; display: flex; justify-content: space-between; align-items: center; }
+  .tabs button { margin-left: 8px; padding: 8px 16px; border: none; border-radius: 6px; cursor: pointer; background: rgba(255,255,255,0.2); color: white; }
+  .tabs button.active { background: white; color: #1e40af; }
+  .view { display: none; height: calc(100vh - 52px); }
+  .view.active { display: block; }
+
+  /* 2D */
+  #view2d { padding: 20px; }
+  #svg2d { width: 100%; max-width: 900px; height: 320px; background: white; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+  .controls2d { margin-top: 16px; }
+  button.fault { margin: 4px; padding: 8px 14px; border-radius: 6px; border: 1px solid #cbd5e1; background: white; cursor: pointer; }
+  button.fault.active { background: #ef4444; color: white; border-color: #ef4444; }
+
+  /* 3D */
+  #view3d { position: relative; }
+  #canvas3d { width: 100%; height: 100%; display: block; }
+  .info3d { position: absolute; top: 16px; left: 16px; background: rgba(255,255,255,0.95); padding: 12px 16px; border-radius: 10px; font-size: 0.9rem; }
+</style>
+</head>
+<body>
+<div class="header">
+  <h2>Visualização DER — Alimentador 2D e 3D</h2>
+  <div class="tabs">
+    <button class="active" onclick="show('2d')">Desenho 2D</button>
+    <button onclick="show('3d')">Cena 3D</button>
+  </div>
+</div>
+
+<!-- 2D -->
+<div id="view2d" class="view active">
+  <svg id="svg2d" viewBox="0 0 900 300">
+    <!-- Usina -->
+    <rect x="30" y="110" width="80" height="80" rx="8" fill="#1e40af"/>
+    <text x="70" y="155" text-anchor="middle" fill="white" font-size="14" font-weight="bold">USINA</text>
+
+    <!-- Linha do alimentador -->
+    <line id="line" x1="110" y1="150" x2="850" y2="150" stroke="#64748b" stroke-width="6"/>
+
+    <!-- Nós -->
+    <g id="nodes"></g>
+
+    <!-- Setas de fluxo -->
+    <g id="arrows"></g>
+  </svg>
+
+  <div class="controls2d">
+    <button class="fault" onclick="setFlow(false)">Fluxo Normal</button>
+    <button class="fault" onclick="setFlow(true)">Inversão de Fluxo</button>
+    <button class="fault" onclick="setFault()">Simular Falta (N3)</button>
+  </div>
+  <p id="msg2d" style="margin-top:12px; color:#475569;">Clique nos botões para ver o fluxo mudar de direção e a falta aparecer.</p>
+</div>
+
+<!-- 3D -->
+<div id="view3d" class="view">
+  <div id="canvas3d"></div>
+  <div class="info3d">
+    <strong>Cena 3D</strong><br>
+    Arraste com o mouse para girar<br>
+    Scroll para aproximar/afastar<br>
+    Usina (azul) • Postes • BESS (verde)
+  </div>
+</div>
+
+<script>
+function show(id) {
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.querySelectorAll('.tabs button').forEach(b => b.classList.remove('active'));
+  document.getElementById('view' + id).classList.add('active');
+  event.target.classList.add('active');
+  if (id === '3d' && !window.threeReady) init3D();
+}
+
+// ========== 2D ==========
+const nodePositions = [200, 320, 440, 560, 680, 800];
+const nodesGroup = document.getElementById('nodes');
+nodePositions.forEach((x, i) => {
+  nodesGroup.innerHTML += `
+    <circle cx="${x}" cy="150" r="22" fill="#f8fafc" stroke="#1e40af" stroke-width="3" id="n${i}"/>
+    <text x="${x}" y="155" text-anchor="middle" font-size="12" font-weight="bold">N${i+1}</text>
+    <text x="${x}" y="120" text-anchor="middle" font-size="11" fill="#64748b">${i%2===0?'Casa':'Comercial'}</text>
+  `;
+});
+
+function setFlow(reverse) {
+  const arrows = document.getElementById('arrows');
+  arrows.innerHTML = '';
+  const color = reverse ? '#f97316' : '#22c55e';
+  nodePositions.forEach((x, i) => {
+    if (i === 0) return;
+    const prev = nodePositions[i-1];
+    const mid = (prev + x) / 2;
+    const pts = reverse
+      ? `${mid+15},150 ${mid-12},140 ${mid-12},160`
+      : `${mid-15},150 ${mid+12},140 ${mid+12},160`;
+    arrows.innerHTML += `<polygon points="${pts}" fill="${color}"/>`;
+  });
+  document.getElementById('line').setAttribute('stroke', reverse ? '#f97316' : '#64748b');
+  document.getElementById('msg2d').textContent = reverse
+    ? 'Fluxo reverso ativo (laranja) — geração dos DERs maior que a carga.'
+    : 'Fluxo normal (verde) — da Usina para as cargas.';
+}
+
+function setFault() {
+  document.getElementById('n2').setAttribute('fill', '#fecaca');
+  document.getElementById('n2').setAttribute('stroke', '#ef4444');
+  document.getElementById('msg2d').textContent = 'Falta simulada no nó N3 (círculo vermelho). Risco de ofuscamento de proteção.';
+}
+
+setFlow(false);
+
+// ========== 3D ==========
+let threeReady = false;
+function init3D() {
+  if (threeReady) return;
+  threeReady = true;
+
+  const container = document.getElementById('canvas3d');
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0xf1f5f9);
+
+  const camera = new THREE.PerspectiveCamera(50, container.clientWidth / container.clientHeight, 0.1, 100);
+  camera.position.set(12, 8, 16);
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(container.clientWidth, container.clientHeight);
+  container.appendChild(renderer.domElement);
+
+  const controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+  const light = new THREE.DirectionalLight(0xffffff, 0.7);
+  light.position.set(10, 15, 8);
+  scene.add(light);
+
+  // Chão
+  const ground = new THREE.Mesh(
+    new THREE.PlaneGeometry(30, 12),
+    new THREE.MeshStandardMaterial({ color: 0xe2e8f0 })
+  );
+  ground.rotation.x = -Math.PI / 2;
+  scene.add(ground);
+
+  // Usina
+  const usina = new THREE.Mesh(
+    new THREE.BoxGeometry(3, 2.5, 2.5),
+    new THREE.MeshStandardMaterial({ color: 0x1e40af })
+  );
+  usina.position.set(-8, 1.25, 0);
+  scene.add(usina);
+
+  // Postes + casas
+  for (let i = 0; i < 5; i++) {
+    const x = -3 + i * 3;
+    const pole = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.12, 0.16, 5),
+      new THREE.MeshStandardMaterial({ color: 0x64748b })
+    );
+    pole.position.set(x, 2.5, 0);
+    scene.add(pole);
+
+    if (i % 2 === 0) {
+      const house = new THREE.Mesh(
+        new THREE.BoxGeometry(1.4, 1.2, 1.4),
+        new THREE.MeshStandardMaterial({ color: 0xffffff })
+      );
+      house.position.set(x, 0.6, 2.2);
+      scene.add(house);
+    }
+  }
+
+  // BESS
+  const bess = new THREE.Mesh(
+    new THREE.BoxGeometry(2.2, 1.6, 1.4),
+    new THREE.MeshStandardMaterial({ color: 0x059669 })
+  );
+  bess.position.set(7, 0.8, 1.5);
+  scene.add(bess);
+
+  function animate() {
+    requestAnimationFrame(animate);
+    controls.update();
+    renderer.render(scene, camera);
+  }
+  animate();
+
+  window.addEventListener('resize', () => {
+    camera.aspect = container.clientWidth / container.clientHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(container.clientWidth, container.clientHeight);
+  });
+}
+</script>
+</body>
+</html>
