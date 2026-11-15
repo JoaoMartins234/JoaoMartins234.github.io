@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Documentação Técnica Comprobatória — DERs</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: 'Segoe UI', system-ui, sans-serif; background: #f8fafc; color: #1e293b; }
+  .header { background: #1e40af; color: white; padding: 16px 24px; }
+  .header h1 { margin: 0; font-size: 1.4rem; }
+  .header .sub { margin: 4px 0 0; font-size: 0.85rem; opacity: 0.9; }
+  .layout { display: grid; grid-template-columns: 1fr 1fr; height: calc(100vh - 72px); }
+  .viz { background: #e8f0e8; position: relative; }
+  #svg { width: 100%; height: 100%; }
+  .ctrl { position: absolute; top: 10px; left: 10px; }
+  .ctrl button { margin: 2px; padding: 5px 10px; border-radius: 5px; border: 1px solid #cbd5e1; background: white; cursor: pointer; font-size: 0.78rem; }
+  .ctrl button.on { background: #1e40af; color: white; }
+  .doc { overflow-y: auto; padding: 22px 26px; background: white; border-left: 1px solid #e2e8f0; }
+  .doc h2 { color: #1e40af; font-size: 1.2rem; margin: 0 0 8px; }
+  .doc h3 { color: #1e3a8a; font-size: 1rem; margin: 20px 0 6px; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px; }
+  .doc p, .doc li { font-size: 0.86rem; line-height: 1.55; color: #334155; }
+  .doc ul { padding-left: 18px; margin: 6px 0; }
+  .meta { font-size: 0.78rem; color: #64748b; margin-bottom: 12px; }
+  .tag { background: #dbeafe; color: #1e40af; padding: 1px 7px; border-radius: 10px; font-size: 0.72rem; }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>Documentação Técnica Comprobatória</h1>
+  <div class="sub">Fundamentos e Impactos dos Recursos Energéticos Distribuídos (DER) • Martins Engenharia</div>
+</div>
+
+<div class="layout">
+  <div class="viz">
+    <div class="ctrl">
+      <button class="on" onclick="scene('normal')">Normal</button>
+      <button onclick="scene('solar')">Alta Solar</button>
+      <button onclick="scene('fault')">Falta</button>
+      <button onclick="scene('island')">Ilhamento</button>
+    </div>
+    <svg id="svg" viewBox="0 0 1100 680"></svg>
+  </div>
+
+  <div class="doc">
+    <div class="meta">Relatório técnico • Critérios: Rigor Conceitual (40%) • Síntese Normativa IEEE 1547 (30%) • Argumentação sobre Coordenação (30%)</div>
+
+    <h2>Respostas às Questões Orientadoras</h2>
+
+    <h3>1. Prosumidor, bidirecionalidade e proteção</h3>
+    <p>O conceito de prosumidor transforma o consumidor em agente ativo capaz de injetar potência. A bidirecionalidade exige que o planejamento da rede de distribuição deixe de ser puramente radial e unidirecional. Do ponto de vista da proteção, a contribuição reversa dos DERs pode reduzir a corrente vista pelos relés a montante (<em>relay blinding</em>), comprometendo a seletividade. É necessário revisar ajustes de proteção, adotar proteção adaptativa ou direcional e considerar a dinâmica de inversores inteligentes.</p>
+
+    <h3>2. Categoria III do IEEE 1547-2018</h3>
+    <p>A Categoria III de performance impõe os requisitos mais rigorosos de <strong>Ride-Through</strong> (VRT e FRT). Em cenários de alta penetração solar, ela impede que milhares de inversores se desconectem simultaneamente durante afundamentos de tensão ou desvios de frequência, evitando o colapso em cascata. Além da permanência conectada, a categoria exige suporte dinâmico (injeção de corrente reativa durante o distúrbio), contribuindo diretamente para a estabilidade de tensão do sistema.</p>
+
+    <h3>3. Modelagem de baterias para NMPC (α, β, γ)</h3>
+    <p>O controle preditivo baseado em modelo (NMPC) depende de uma representação fiel da dinâmica do Estado de Carga (SoC). Os fatores de eficiência de carga (α), descarga (β) e autodescarga (γ) capturam perdas reais. Omiti-los leva a superestimação da energia disponível e da flexibilidade operacional, resultando em setpoints inviáveis e degradação prematura do BESS. A inclusão desses parâmetros torna a otimização fisicamente realizável.</p>
+
+    <h3>4. Trade-off: coordenação centralizada vs. ADMM/ALADIN</h3>
+    <ul>
+      <li><strong>Centralizada:</strong> obtém ótimo global, mas enfrenta gargalos de escalabilidade, alta latência de comunicação e violação da soberania de dados dos prosumidores.</li>
+      <li><strong>Distribuída (ADMM/ALADIN):</strong> cada agente resolve um subproblema local e troca apenas variáveis de acoplamento (preços sombra ou consensos de potência/tensão). Reduz volume de dados, preserva privacidade e escala melhor para milhares de DERs, ao custo de convergência iterativa.</li>
+    </ul>
+
+    <h3>5. Controle Primário, Secundário e Terciário</h3>
+    <ul>
+      <li><strong>Primário (ms–s):</strong> executado localmente nos inversores (droop, grid-forming/following, Volt-Var, Ride-Through). Garante estabilidade imediata sem comunicação.</li>
+      <li><strong>Secundário (s–min):</strong> restaura tensão e frequência aos valores nominais e coordena agregadores locais.</li>
+      <li><strong>Terciário (min–h):</strong> EMS, fluxo de potência ótimo (OPF) e despacho de Virtual Power Plants (VPPs), podendo ser centralizado ou distribuído.</li>
+    </ul>
+    <p>Os inversores inteligentes são o principal atuador do nível primário e fornecem os graus de liberdade utilizados pelos níveis superiores.</p>
+
+    <h3>Considerações Finais</h3>
+    <p>A integração massiva de DERs exige a reengenharia da rede de distribuição: de passiva e unidirecional para ativa e bidirecional. A inteligência computacional no edge, a interoperabilidade definida pelo IEEE 1547-2018 e mecanismos de coordenação distribuída são condições necessárias para manter estabilidade, resiliência e soberania de dados.</p>
+
+    <p style="margin-top:24px;font-size:0.78rem;color:#64748b">Documento elaborado com base no roteiro de atividade e nos conceitos de redes ativas, controle hierárquico e otimização distribuída. Martins Engenharia • 2026</p>
+  </div>
+</div>
+
+<script>
+const svg = document.getElementById('svg');
+function draw(s) {
+  svg.innerHTML = '';
+  svg.innerHTML += `<rect width="1100" height="680" fill="#d4e4d4"/>`;
+  svg.innerHTML += `<rect y="300" width="1100" height="55" fill="#9ca3af"/><rect y="324" width="1100" height="3" fill="#fbbf24" stroke-dasharray="16,10"/>`;
+  svg.innerHTML += `<rect x="500" width="45" height="680" fill="#9ca3af"/>`;
+  svg.innerHTML += `<rect x="25" y="25" width="110" height="70" rx="4" fill="#1e40af"/><text x="80" y="115" text-anchor="middle" fill="#1e40af" font-size="11" font-weight="bold">SUBESTAÇÃO</text>`;
+
+  [150,280,410,620,750,880,1000].forEach((x,i)=>{
+    const f = s==='fault' && i===3;
+    const c = f?'#ef4444':'#4b5563';
+    svg.innerHTML += `<line x1="${x}" y1="280" x2="${x}" y2="355" stroke="${c}" stroke-width="5"/><line x1="${x-14}" y1="295" x2="${x+14}" y2="295" stroke="${c}" stroke-width="2"/>${f?'<text x="'+x+'" y="270" text-anchor="middle" font-size="15" fill="#ef4444">⚠</text>':''}`;
+  });
+  svg.innerHTML += `<path d="M150,295 L1000,295" fill="none" stroke="#374151" stroke-width="1.6"/>`;
+
+  [[90,150],[210,130],[340,160],[580,140],[710,120],[850,155],[110,390],[240,420],[370,380],[600,400],[740,430],[880,390]].forEach((h,i)=>{
+    const sol = s==='solar' || (s==='normal' && i%2===0);
+    svg.innerHTML += `<rect x="${h[0]}" y="${h[1]}" width="55" height="42" rx="2" fill="#fef3c7" stroke="#d97706"/><polygon points="${h[0]-3},${h[1]} ${h[0]+27},${h[1]-16} ${h[0]+58},${h[1]}" fill="#b45309"/>${sol?`<rect x="${h[0]+7}" y="${h[1]-12}" width="32" height="10" fill="#1e40af" opacity=".85"/>`:''}`;
+  });
+
+  svg.innerHTML += `<rect x="960" y="450" width="70" height="40" rx="3" fill="#059669"/><text x="995" y="474" text-anchor="middle" fill="white" font-size="10" font-weight="bold">BESS</text>`;
+
+  const col = s==='solar'?'#f97316':(s==='fault'?'#ef4444':'#22c55e');
+  const d = s==='solar'?-1:1;
+  for(let i=0;i<5;i++){
+    if(s==='fault' && i>=3) continue;
+    const x=190+i*140;
+    const pts = d>0?`${x},295 ${x-9},289 ${x-9},301`:`${x},295 ${x+9},289 ${x+9},301`;
+    svg.innerHTML += `<polygon points="${pts}" fill="${col}"/>`;
+  }
+}
+function scene(s){
+  document.querySelectorAll('.ctrl button').forEach(b=>b.classList.remove('on'));
+  event.target.classList.add('on');
+  draw(s);
+}
+draw('normal');
+</script>
+</body>
+</html>
