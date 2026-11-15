@@ -21,7 +21,7 @@
   #msg { margin-top: 10px; font-size: 0.9rem; color: #475569; max-width: 900px; }
   #view3d { position: relative; }
   #canvas3d { width: 100%; height: 100%; display: block; }
-  .panel3d { position: absolute; top: 12px; left: 12px; background: rgba(255,255,255,0.96); padding: 12px; border-radius: 10px; width: 280px; max-height: 80vh; overflow-y: auto; box-shadow: 0 4px 16px rgba(0,0,0,0.1); }
+  .panel3d { position: absolute; top: 12px; left: 12px; background: rgba(255,255,255,0.96); padding: 12px; border-radius: 10px; width: 290px; max-height: 85vh; overflow-y: auto; box-shadow: 0 4px 16px rgba(0,0,0,0.1); }
   .panel3d button { display: block; width: 100%; margin: 4px 0; padding: 7px; border-radius: 6px; border: 1px solid #cbd5e1; background: white; cursor: pointer; text-align: left; font-size: 0.82rem; }
   .panel3d button.active { background: #1e40af; color: white; }
   .status { margin-top: 8px; padding: 8px; border-radius: 6px; font-size: 0.85rem; font-weight: 600; }
@@ -29,6 +29,8 @@
   .status-reverse { background: #ffedd5; color: #9a3412; }
   .status-fault { background: #fee2e2; color: #991b1b; }
   .status-island { background: #e0e7ff; color: #3730a3; }
+  .status-comm { background: #fef3c7; color: #92400e; }
+  .status-admm { background: #f0fdf4; color: #166534; }
 </style>
 </head>
 <body>
@@ -53,11 +55,14 @@
     <button onclick="setMode('normal')">Fluxo Normal</button>
     <button onclick="setMode('reverse')">Inversão de Fluxo</button>
     <button onclick="setMode('voltRise')">Elevação de Tensão</button>
+    <button onclick="setMode('voltVar')">Volt-Var Ativo</button>
     <button onclick="setMode('sag')">Afundamento (Ride-Through)</button>
     <button onclick="setMode('short')">Curto-Circuito N3</button>
     <button onclick="setMode('island')">Ilhamento</button>
     <button onclick="setMode('bessCharge')">BESS Carregando</button>
     <button onclick="setMode('bessDis')">BESS Descarregando</button>
+    <button onclick="setMode('commLoss')">Perda de Comunicação</button>
+    <button onclick="setMode('admm')">Coordenação ADMM</button>
   </div>
   <div id="msg">Selecione uma condição para visualizar o comportamento da rede ativa.</div>
 </div>
@@ -69,11 +74,14 @@
     <button onclick="setMode3D('normal')">Fluxo Normal</button>
     <button onclick="setMode3D('reverse')">Inversão de Fluxo</button>
     <button onclick="setMode3D('voltRise')">Elevação de Tensão</button>
+    <button onclick="setMode3D('voltVar')">Volt-Var Ativo</button>
     <button onclick="setMode3D('sag')">Afundamento + Ride-Through</button>
     <button onclick="setMode3D('short')">Curto N3 (Relay Blinding)</button>
     <button onclick="setMode3D('island')">Ilhamento (Grid-Forming)</button>
     <button onclick="setMode3D('bessCharge')">BESS Carregando</button>
     <button onclick="setMode3D('bessDis')">BESS Descarregando</button>
+    <button onclick="setMode3D('commLoss')">Perda de Comunicação</button>
+    <button onclick="setMode3D('admm')">Coordenação ADMM/ALADIN</button>
     <div id="status3" class="status status-normal">Rede em operação normal</div>
   </div>
 </div>
@@ -87,7 +95,6 @@ function show(id) {
   if (id === '3d' && !window.threeReady) init3D();
 }
 
-// ========== 2D ==========
 const nodePos = [180, 300, 420, 540, 660, 780];
 const nodesG = document.getElementById('nodes');
 nodePos.forEach((x, i) => {
@@ -98,11 +105,14 @@ const modes = {
   normal: { reverse: false, color: '#22c55e', msg: 'Fluxo unidirecional (Usina → cargas). Operação convencional.', status: 'normal' },
   reverse: { reverse: true, color: '#f97316', msg: 'Inversão de fluxo: geração DER > carga. Risco de elevação de tensão e ofuscamento de proteção.', status: 'reverse' },
   voltRise: { reverse: true, color: '#eab308', msg: 'Elevação de tensão no final do ramal (>1.05 pu). Volt-Var/Volt-Watt devem atuar (IEEE 1547-2018).', status: 'reverse' },
+  voltVar: { reverse: true, color: '#8b5cf6', msg: 'Volt-Var ativo: inversores absorvem reativo para reduzir a elevação de tensão. Controle primário autônomo (edge).', status: 'normal' },
   sag: { reverse: false, color: '#f59e0b', msg: 'Afundamento de tensão. Inversores em Ride-Through (Categoria III) permanecem conectados e injetam reativo.', status: 'fault' },
   short: { reverse: false, color: '#ef4444', msg: 'Curto-circuito próximo a N3. Contribuição reversa dos DERs pode causar Relay Blinding.', status: 'fault' },
   island: { reverse: false, color: '#6366f1', msg: 'Ilhamento: alimentador isolado. BESS + inversores grid-forming sustentam tensão e frequência locais.', status: 'island' },
   bessCharge: { reverse: true, color: '#06b6d4', msg: 'BESS carregando (absorvendo potência). Atua como carga flexível e buffer.', status: 'normal' },
-  bessDis: { reverse: false, color: '#10b981', msg: 'BESS descarregando (injetando potência). Suporte de potência ativa e frequência.', status: 'normal' }
+  bessDis: { reverse: false, color: '#10b981', msg: 'BESS descarregando (injetando potência). Suporte de potência ativa e frequência.', status: 'normal' },
+  commLoss: { reverse: false, color: '#f59e0b', msg: 'Perda de comunicação com o centro. Controle primário (edge) continua operando de forma autônoma. Soberania de dados preservada.', status: 'comm' },
+  admm: { reverse: false, color: '#22c55e', msg: 'Coordenação distribuída via ADMM/ALADIN. Cada agente otimiza localmente e troca apenas variáveis de acoplamento. Escalabilidade e privacidade.', status: 'admm' }
 };
 
 function setMode(mode) {
@@ -121,7 +131,6 @@ function setMode(mode) {
   });
   document.getElementById('line').setAttribute('stroke', m.color);
 
-  // Destaque visual de falta
   document.getElementById('faultMark').innerHTML = mode === 'short' ? `<circle cx="420" cy="135" r="28" fill="none" stroke="#ef4444" stroke-width="3"/>` : '';
   if (mode === 'short') document.getElementById('n2').setAttribute('fill', '#fecaca');
   else nodePos.forEach((_, i) => document.getElementById('n'+i).setAttribute('fill', '#f8fafc'));
@@ -130,7 +139,6 @@ function setMode(mode) {
 }
 setMode('normal');
 
-// ========== 3D ==========
 let threeReady = false;
 let flowDir = 1, particleMat, particles, particleCount = 70;
 let bessMesh, usinaMesh;
@@ -147,7 +155,6 @@ function setMode3D(mode) {
   st.className = 'status status-' + m.status;
   st.textContent = m.msg;
 
-  // Destaque visual simples no BESS / Usina
   if (bessMesh) bessMesh.material.emissive.set(mode.includes('bess') ? 0x064e3b : 0x000000);
   if (usinaMesh) usinaMesh.material.emissive.set(mode === 'island' ? 0x1e3a8a : 0x000000);
 }
