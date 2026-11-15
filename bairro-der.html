@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bairro Atendido — Rede Ativa com DERs</title>
+<style>
+  body { margin: 0; font-family: Segoe UI, system-ui, sans-serif; background: #e8f0e8; }
+  .header { background: #1e40af; color: white; padding: 12px 20px; display: flex; justify-content: space-between; align-items: center; }
+  .controls { padding: 10px 20px; background: white; }
+  button { margin: 3px; padding: 6px 12px; border-radius: 6px; border: 1px solid #cbd5e1; background: white; cursor: pointer; font-size: 0.85rem; }
+  button.active { background: #1e40af; color: white; }
+  #view { width: 100%; height: calc(100vh - 100px); }
+  #info { position: absolute; bottom: 12px; left: 12px; background: rgba(255,255,255,0.95); padding: 10px 14px; border-radius: 8px; font-size: 0.85rem; max-width: 320px; }
+</style>
+</head>
+<body>
+<div class="header">
+  <h2 style="margin:0;font-size:1.2rem">Bairro Residencial — Alimentador com DERs</h2>
+  <div>
+    <button class="active" onclick="setScene('normal')">Dia Normal</button>
+    <button onclick="setScene('solar')">Alta Geração Solar</button>
+    <button onclick="setScene('night')">Noite (BESS ativo)</button>
+    <button onclick="setScene('fault')">Falta em Poste</button>
+  </div>
+</div>
+<svg id="view" viewBox="0 0 1200 700"></svg>
+<div id="info">Clique nos botões para mudar o cenário do bairro.</div>
+
+<script>
+const svg = document.getElementById('view');
+const info = document.getElementById('info');
+
+function drawNeighborhood(scene) {
+  svg.innerHTML = '';
+
+  // Ruas
+  svg.innerHTML += `<rect x="0" y="0" width="1200" height="700" fill="#d4e4d4"/>`;
+  // Rua principal horizontal
+  svg.innerHTML += `<rect x="0" y="300" width="1200" height="70" fill="#9ca3af"/>`;
+  svg.innerHTML += `<rect x="0" y="330" width="1200" height="4" fill="#fbbf24" stroke-dasharray="20,15"/>`;
+  // Rua vertical
+  svg.innerHTML += `<rect x="550" y="0" width="60" height="700" fill="#9ca3af"/>`;
+
+  // Subestação / Usina
+  svg.innerHTML += `
+    <rect x="40" y="40" width="140" height="100" rx="6" fill="#1e40af"/>
+    <rect x="55" y="55" width="40" height="30" fill="#93c5fd"/>
+    <rect x="105" y="55" width="40" height="30" fill="#93c5fd"/>
+    <text x="110" y="160" text-anchor="middle" fill="#1e40af" font-weight="bold" font-size="14">SUBESTAÇÃO</text>
+  `;
+
+  // Postes ao longo da rua principal
+  const poles = [180, 320, 460, 700, 840, 980, 1100];
+  poles.forEach((x, i) => {
+    const isFault = (scene === 'fault' && i === 3);
+    const color = isFault ? '#ef4444' : '#4b5563';
+    svg.innerHTML += `
+      <line x1="${x}" y1="280" x2="${x}" y2="370" stroke="${color}" stroke-width="6"/>
+      <line x1="${x-18}" y1="295" x2="${x+18}" y2="295" stroke="${color}" stroke-width="3"/>
+      ${isFault ? `<text x="${x}" y="270" text-anchor="middle" font-size="20" fill="#ef4444">⚠</text>` : ''}
+    `;
+  });
+
+  // Fiação
+  svg.innerHTML += `<path d="M180,295 L1100,295" fill="none" stroke="#374151" stroke-width="2"/>`;
+
+  // Casas (quadrantes)
+  const houses = [
+    {x:120, y:180}, {x:250, y:160}, {x:380, y:190},
+    {x:650, y:170}, {x:780, y:150}, {x:920, y:185},
+    {x:150, y:420}, {x:280, y:450}, {x:400, y:410},
+    {x:680, y:430}, {x:820, y:460}, {x:960, y:420}
+  ];
+
+  houses.forEach((h, i) => {
+    const hasSolar = scene === 'solar' || (scene === 'normal' && i % 2 === 0);
+    const solarColor = hasSolar ? '#1e40af' : 'transparent';
+    svg.innerHTML += `
+      <rect x="${h.x}" y="${h.y}" width="70" height="55" rx="3" fill="#fef3c7" stroke="#d97706" stroke-width="1.5"/>
+      <polygon points="${h.x-5},${h.y} ${h.x+35},${h.y-22} ${h.x+75},${h.y}" fill="#b45309"/>
+      <rect x="${h.x+22}" y="${h.y+20}" width="18" height="22" fill="#92400e"/>
+      ${hasSolar ? `<rect x="${h.x+10}" y="${h.y-16}" width="40" height="14" fill="${solarColor}" opacity="0.85"/>` : ''}
+    `;
+  });
+
+  // BESS
+  svg.innerHTML += `
+    <rect x="1020" y="480" width="90" height="55" rx="4" fill="#059669"/>
+    <text x="1065" y="512" text-anchor="middle" fill="white" font-weight="bold" font-size="13">BESS</text>
+  `;
+
+  // Árvores simples
+  [[200,100],[450,80],[750,90],[300,550],[850,540]].forEach(([x,y]) => {
+    svg.innerHTML += `<circle cx="${x}" cy="${y}" r="18" fill="#16a34a"/><rect x="${x-3}" y="${y}" width="6" height="20" fill="#78350f"/>`;
+  });
+
+  // Setas de fluxo na fiação
+  const flowColor = scene === 'solar' ? '#f97316' : '#22c55e';
+  const dir = scene === 'solar' ? -1 : 1;
+  for (let i = 0; i < 6; i++) {
+    const x = 220 + i * 140;
+    const pts = dir > 0
+      ? `${x},295 ${x-12},288 ${x-12},302`
+      : `${x},295 ${x+12},288 ${x+12},302`;
+    svg.innerHTML += `<polygon points="${pts}" fill="${flowColor}"/>`;
+  }
+
+  // Textos de status
+  const status = {
+    normal: 'Operação normal — fluxo da subestação para as casas.',
+    solar: 'Alta geração solar — inversão de fluxo (setas laranja). Elevação de tensão possível.',
+    night: 'Período noturno — BESS descarregando para suprir a carga.',
+    fault: 'Falta isolada em poste — risco de ofuscamento de proteção por DERs a jusante.'
+  };
+  info.textContent = status[scene] || status.normal;
+}
+
+function setScene(s) {
+  document.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+  event.target.classList.add('active');
+  drawNeighborhood(s);
+}
+
+drawNeighborhood('normal');
+</script>
+</body>
+</html>
