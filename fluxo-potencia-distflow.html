@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Algoritmo LinDistFlow — Rede Ativa com DERs</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  body { font-family: Segoe UI, system-ui, sans-serif; background: #f8fafc; color: #1e293b; margin: 0; padding: 20px; }
+  h1 { color: #1e40af; }
+  .container { max-width: 1100px; margin: 0 auto; }
+  .controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; background: white; padding: 16px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); margin-bottom: 20px; }
+  label { font-size: 0.85rem; color: #475569; display: block; margin-bottom: 4px; }
+  input[type=range] { width: 100%; }
+  .value { font-weight: 600; color: #1e40af; }
+  .results { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .card { background: white; padding: 16px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+  canvas { max-height: 280px; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-top: 8px; }
+  th, td { border: 1px solid #e2e8f0; padding: 6px 8px; text-align: center; }
+  th { background: #f1f5f9; }
+  .alert { margin-top: 12px; padding: 10px; border-radius: 8px; font-size: 0.9rem; }
+  .alert-ok { background: #dcfce7; color: #166534; }
+  .alert-warn { background: #fef3c7; color: #92400e; }
+  .alert-danger { background: #fee2e2; color: #991b1b; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Algoritmo de Fluxo de Potência — LinDistFlow</h1>
+  <p>Modelo linearizado de Baran & Wu para alimentador radial com DERs, BESS e controle Volt-Var (IEEE 1547-2018).</p>
+
+  <div class="controls">
+    <div>
+      <label>Penetração Solar (GD) <span class="value" id="pvVal">40%</span></label>
+      <input type="range" id="pv" min="0" max="120" value="40">
+    </div>
+    <div>
+      <label>Carga total <span class="value" id="loadVal">1.0 pu</span></label>
+      <input type="range" id="load" min="30" max="150" value="100" step="5">
+    </div>
+    <div>
+      <label>BESS (agregado) <span class="value" id="bessVal">0</span></label>
+      <input type="range" id="bess" min="-80" max="80" value="0" step="10">
+    </div>
+    <div>
+      <label><input type="checkbox" id="voltVar" checked> Volt-Var ativo</label>
+      <label><input type="checkbox" id="voltWatt"> Volt-Watt (curtailment)</label>
+    </div>
+  </div>
+
+  <div class="results">
+    <div class="card">
+      <h3>Perfil de Tensão</h3>
+      <canvas id="vChart"></canvas>
+    </div>
+    <div class="card">
+      <h3>Fluxo de Potência Ativa nos Trechos</h3>
+      <canvas id="pChart"></canvas>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px">
+    <h3>Resultados do Algoritmo</h3>
+    <div id="alert" class="alert alert-ok">Calculando...</div>
+    <table id="table">
+      <thead><tr><th>Nó</th><th>P inj (pu)</th><th>Q inj (pu)</th><th>V (pu)</th><th>P trecho (pu)</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+// ========== Algoritmo LinDistFlow ==========
+// Alimentador radial de 6 nós (SE + N1..N5)
+// r, x em pu (base 1 MVA, 13.8 kV típico)
+const r = [0.012, 0.015, 0.018, 0.020, 0.022]; // resistência dos trechos
+const x = [0.018, 0.020, 0.022, 0.025, 0.028]; // reatância
+const nNodes = 6; // 0 = SE, 1..5 = nós
+
+function voltVarQ(v, enabled) {
+  if (!enabled) return 0;
+  // Curva IEEE 1547 simplificada: absorve Q quando V > 1.02, injeta quando V < 0.98
+  if (v > 1.05) return -0.25;
+  if (v > 1.02) return -0.15 * (v - 1.02) / 0.03;
+  if (v < 0.95) return 0.25;
+  if (v < 0.98) return 0.15 * (0.98 - v) / 0.03;
+  return 0;
+}
+
+function runLinDistFlow(pvPct, loadPct, bessPct, vvOn, vwOn) {
+  const loadFactor = loadPct / 100;
+  const pvFactor = pvPct / 100;
+  const bess = bessPct / 100; // positivo = descarrega
+
+  // Injeções nodais (pu). Positivo = geração
+  // Distribuição típica: cargas maiores no final, PV mais uniforme
+  const pLoad = [0, 0.18, 0.22, 0.25, 0.20, 0.15].map(v => -v * loadFactor);
+  const pPV   = [0, 0.15, 0.20, 0.25, 0.22, 0.18].map(v =>  v * pvFactor);
+  const pBess = [0, 0, 0, bess * 0.4, 0, bess * 0.3]; // BESS nos nós 3 e 5
+
+  let pInj = pLoad.map((pl, i) => pl + pPV[i] + pBess[i]);
+
+  // Volt-Watt: reduz PV se V > 1.06
+  if (vwOn) {
+    // será aplicado depois do cálculo de tensão (iteração simples)
+  }
+
+  // Forward sweep simplificado (LinDistFlow)
+  // P[k] = potência saindo do nó k em direção ao final
+  const P = new Array(nNodes).fill(0);
+  const Q = new Array(nNodes).fill(0);
+  const V = new Array(nNodes).fill(1.0);
+
+  // Backward: acumula potência do final para a SE
+  for (let i = nNodes - 1; i >= 1; i--) {
+    P[i-1] = P[i] - pInj[i]; // P no trecho anterior
+    // Q será atualizado com Volt-Var
+  }
+
+  // Iteração simples para Volt-Var + tensão
+  for (let iter = 0; iter < 5; iter++) {
+    // Recalcula Q com Volt-Var
+    for (let i = 1; i < nNodes; i++) {
+      Q[i] = voltVarQ(V[i], vvOn) * Math.max(0.1, Math.abs(pPV[i]));
+    }
+    // Backward Q
+    for (let i = nNodes - 1; i >= 1; i--) {
+      Q[i-1] = Q[i] - (i === nNodes-1 ? 0 : 0); // simplificado
+    }
+    // Forward: tensão
+    V[0] = 1.0;
+    for (let i = 0; i < nNodes - 1; i++) {
+      const dV = 2 * (r[i] * P[i] + x[i] * Q[i]);
+      V[i+1] = V[i] - dV;
+    }
+    // Aplica Volt-Watt se necessário
+    if (vwOn) {
+      for (let i = 1; i < nNodes; i++) {
+        if (V[i] > 1.06) {
+          const curtail = Math.min(0.4, (V[i] - 1.06) * 5);
+          pInj[i] -= pPV[i] * curtail;
+        }
+      }
+      // Recalcula P
+      for (let i = nNodes - 1; i >= 1; i--) {
+        P[i-1] = (i === nNodes-1 ? 0 : P[i]) - pInj[i];
+      }
+    }
+  }
+
+  return { V, P, Q, pInj };
+}
+
+// ========== Interface ==========
+const pvSlider = document.getElementById('pv');
+const loadSlider = document.getElementById('load');
+const bessSlider = document.getElementById('bess');
+const vvCheck = document.getElementById('voltVar');
+const vwCheck = document.getElementById('voltWatt');
+
+const vChart = new Chart(document.getElementById('vChart'), {
+  type: 'line',
+  data: { labels: ['SE','N1','N2','N3','N4','N5'], datasets: [{ label: 'Tensão (pu)', data: [], borderColor: '#1e40af', tension: 0.3, fill: false }] },
+  options: { responsive: true, scales: { y: { min: 0.94, max: 1.08 } }, plugins: { legend: { display: false } } }
+});
+
+const pChart = new Chart(document.getElementById('pChart'), {
+  type: 'bar',
+  data: { labels: ['SE-N1','N1-N2','N2-N3','N3-N4','N4-N5'], datasets: [{ label: 'P (pu)', data: [], backgroundColor: '#3b82f6' }] },
+  options: { responsive: true, plugins: { legend: { display: false } } }
+});
+
+function update() {
+  const pv = +pvSlider.value;
+  const load = +loadSlider.value;
+  const bess = +bessSlider.value;
+  document.getElementById('pvVal').textContent = pv + '%';
+  document.getElementById('loadVal').textContent = (load/100).toFixed(2) + ' pu';
+  document.getElementById('bessVal').textContent = (bess > 0 ? '+' : '') + (bess/100).toFixed(2) + ' pu';
+
+  const res = runLinDistFlow(pv, load, bess, vvCheck.checked, vwCheck.checked);
+
+  vChart.data.datasets[0].data = res.V.map(v => +v.toFixed(4));
+  vChart.update();
+
+  pChart.data.datasets[0].data = res.P.slice(0,5).map(p => +p.toFixed(3));
+  pChart.data.datasets[0].backgroundColor = res.P.slice(0,5).map(p => p < 0 ? '#f97316' : '#3b82f6');
+  pChart.update();
+
+  // Tabela
+  const tbody = document.querySelector('#table tbody');
+  tbody.innerHTML = res.V.map((v, i) => `
+    <tr>
+      <td>${i===0?'SE':'N'+i}</td>
+      <td>${res.pInj[i].toFixed(3)}</td>
+      <td>${res.Q[i].toFixed(3)}</td>
+      <td>${v.toFixed(4)}</td>
+      <td>${i<5 ? res.P[i].toFixed(3) : '-'}</td>
+    </tr>
+  `).join('');
+
+  // Alertas
+  const maxV = Math.max(...res.V);
+  const minV = Math.min(...res.V);
+  const reverse = res.P.some(p => p < -0.05);
+  const alert = document.getElementById('alert');
+  if (maxV > 1.06) {
+    alert.className = 'alert alert-danger';
+    alert.textContent = `Elevação de tensão crítica (${maxV.toFixed(3)} pu). Volt-Watt deve atuar.`;
+  } else if (maxV > 1.05 || reverse) {
+    alert.className = 'alert alert-warn';
+    alert.textContent = reverse ? `Inversão de fluxo detectada. Tensão máx: ${maxV.toFixed(3)} pu.` : `Tensão elevada (${maxV.toFixed(3)} pu).`;
+  } else if (minV < 0.95) {
+    alert.className = 'alert alert-warn';
+    alert.textContent = `Afundamento de tensão (${minV.toFixed(3)} pu). Ride-Through ativo.`;
+  } else {
+    alert.className = 'alert alert-ok';
+    alert.textContent = `Operação normal. Tensão entre ${minV.toFixed(3)} e ${maxV.toFixed(3)} pu.`;
+  }
+}
+
+[pvSlider, loadSlider, bessSlider, vvCheck, vwCheck].forEach(el => el.addEventListener('input', update));
+update();
+</script>
+</body>
+</html>
